@@ -1,10 +1,10 @@
-## 🔮 Sistema de Predicción de Abandono de Usuarios
+# Sistema de Predicción de Abandono de Usuarios
 
 Este módulo permite predecir qué usuarios están en riesgo de abandonar Watpato, utilizando Machine Learning entrenado con datos reales de comportamiento guardados en la base de datos. El proceso incluye extracción de métricas, entrenamiento del modelo, predicción masiva y una API para predicción en tiempo real.
 
 ---
 
-### 📁 Estructura del backend
+## Estructura del backend
 
 ```
 backend-predictor/
