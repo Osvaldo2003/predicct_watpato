@@ -1,77 +1,86 @@
-# backend-predictivo/predict_api.py
+# backend/api/predict_api.py
+
+from flask import Flask, jsonify
+import pandas as pd
 import joblib
 import json
-from flask import Flask, request, jsonify
 from pathlib import Path
-import pandas as pd
-
-MODEL_PATH = Path("backend-predictivo/model/abandono_model.pkl")
-META_PATH  = Path("backend-predictivo/model/metadata.json")
 
 app = Flask(__name__)
 
-print("📦 Cargando modelo...")
+# --------------------------
+# CONFIG
+# --------------------------
+BASE_DIR = Path(__file__).resolve().parent.parent  # <-- subimos un nivel (de /api a /backend)
+MODEL_PATH = BASE_DIR / "model" / "abandono_model.pkl"
+DATA_PATH = BASE_DIR / "data" / "encuesta_usuarios.csv"
+META_PATH = BASE_DIR / "model" / "metadata.json"
+
+# --------------------------
+# CARGA
+# --------------------------
+print("⚙️ Cargando modelo y metadata...")
 model = joblib.load(MODEL_PATH)
+
 with open(META_PATH, "r", encoding="utf-8") as f:
-    meta = json.load(f)
+    metadata = json.load(f)
 
-# Para simplificar la demo, esperamos que el frontend ya te mande los features numéricos/binarizados.
-# Si quieres, puedes replicar el preprocesamiento aquí exactamente como en el train_model.py
-EXPECTED_FEATURES = (
-    meta["features_numeric"] + meta["features_binary"] + meta["features_categorical"]
-)
+features = metadata["features"]
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify(status="ok", model=meta["best_model"])
+# --------------------------
+# ENDPOINT PRINCIPAL
+# --------------------------
+@app.route("/api/predicciones", methods=["GET"])
+def get_predictions():
+    try:
+        df = pd.read_csv(DATA_PATH)
+        df.columns = [col.strip() for col in df.columns]
 
-@app.route("/predict", methods=["POST"])
-def predict():
-    """
-    Espera un JSON con:
-    {
-      "instances": [
-        {
-           "freq_lectura_num": 1,
-           "freq_offline_num": 2,
-           ...
-           "pref_formato": "Semanal"
-        },
-        ...
-      ]
-    }
-    """
-    data = request.get_json()
-    if data is None or "instances" not in data:
-        return jsonify(error="Debes enviar 'instances'"), 400
-
-    X = pd.DataFrame(data["instances"])
-    # Verificación básica de columnas
-    missing = set(EXPECTED_FEATURES) - set(X.columns)
-    if missing:
-        return jsonify(error=f"Faltan columnas: {list(missing)}"), 400
-
-    proba = model.predict_proba(X)[:, 1]
-    pred = (proba >= 0.5).astype(int)
-
-    riesgo_txt = []
-    for p in proba:
-        if p >= 0.75:
-            riesgo_txt.append("Alto")
-        elif p >= 0.5:
-            riesgo_txt.append("Medio")
-        else:
-            riesgo_txt.append("Bajo")
-
-    out = []
-    for i in range(len(pred)):
-        out.append({
-            "probabilidad": float(proba[i]),
-            "clase": int(pred[i]),
-            "riesgo": riesgo_txt[i]
+        # Mapear datos
+        df = df.rename(columns={
+            "¿Con qué frecuencia lees libros digitales?": "frecuencia_lectura",
+            "¿Cuántas horas al día dedicas a la lectura digital?": "horas_lectura",
+            "¿Te gustaría recibir recomendaciones basadas en los libros que ya has leído?": "quiere_recomendaciones"
         })
 
-    return jsonify(predictions=out)
+        map_frecuencia = {
+            "Casi nunca": 0,
+            "Una vez al mes": 1,
+            "Una vez por semana": 2,
+            "Varias veces a la semana": 3,
+            "A diario": 4
+        }
+        map_horas = {
+            "Menos de 1 hora": 0.3,
+            "Entre 1 y 2 horas": 1.5,
+            "Entre 2 y 4 horas": 3,
+            "Más de 4 horas": 5
+        }
+        map_recomienda = {
+            "No me interesa": 0,
+            "Prefiero explorar por mi cuenta": 0,
+            "Tal vez": 0,
+            "Sí, mucho": 1
+        }
+
+        df["frecuencia_lectura"] = df["frecuencia_lectura"].map(map_frecuencia)
+        df["horas_lectura"] = df["horas_lectura"].map(map_horas)
+        df["quiere_recomendaciones"] = df["quiere_recomendaciones"].map(map_recomienda)
+
+        df = df.dropna(subset=features)
+        if df.empty:
+            return jsonify({"error": "No hay datos válidos para predecir."}), 400
+
+        X = df[features]
+        df["prob_abandono"] = model.predict_proba(X)[:, 1]
+        df["abandono_predicho"] = model.predict(X)
+
+        salida = df[["frecuencia_lectura", "horas_lectura", "quiere_recomendaciones", "prob_abandono", "abandono_predicho"]]
+        return salida.to_dict(orient="records")
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(debug=True)

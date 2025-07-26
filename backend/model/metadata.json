@@ -1,0 +1,10 @@
+{
+  "features": [
+    "frecuencia_lectura",
+    "horas_lectura",
+    "quiere_recomendaciones"
+  ],
+  "target": "abandono",
+  "descripcion": "Predicción de abandono basado en hábitos de lectura digital.",
+  "criterios": "abandono si lectura baja, pocas horas y no desea recomendaciones"
+}
